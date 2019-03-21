@@ -76,7 +76,7 @@ colnames(unique_value_dat) = 'number_of_unique_values'
 unique_value_dat$number_of_missing_values = missing_value_dat$`purrr::map_dbl(dat, ~sum(is.na(.)))`
 ```
 
-These transactions tracked purchases over a two year period in `r unique_value_dat['state','number_of_unique_values']` states and total over `r nrow(transactions)` specific product purchases were recorded. Total `r nrow(transactions)` specific items purchases were recorded across `r unique_value_transactions['store','number_of_unique_values']` unique stores. A total of `r unique_value_transactions['upc','number_of_unique_values']` different products within the four commodities were recorded during this time period. 
+These transactions tracked purchases over a two year period in `r unique_value_transactions['state','number_of_unique_values']` states and total over `r nrow(transactions)` specific product purchases were recorded. Total `r nrow(transactions)` specific items purchases were recorded across `r unique_value_transactions['store','number_of_unique_values']` unique stores. A total of `r unique_value_transactions['upc','number_of_unique_values']` different products within the four commodities were recorded during this time period. 
 
 ```{r warning=FALSE, message=FALSE, echo=FALSE,results='asis'}
 knitr::kable(unique_value_transactions)   
