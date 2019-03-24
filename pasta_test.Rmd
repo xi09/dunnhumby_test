@@ -1,0 +1,1183 @@
+---
+title: "Retail Category Report: Story about Pasta, Pasta Sacue, Pancake Mixes and Syrup"
+author: "Xi Wang"
+date: "3/18/2019"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(purrr)
+library(readr)
+library(dplyr)
+library(plyr)
+library(ggplot2)
+library(tidyr)
+library(lubridate)
+library(scales)
+library(arules)
+library(zipcode)
+library(ggmap)
+library(leaflet)
+library(MASS) 
+```
+
+```{r read data, message=FALSE,warning=FALSE, include=FALSE}
+options(scipen=999)
+causal <- read.csv('dh_causal_lookup.csv',na.strings=c("","NA"))
+product <- read.csv('dh_product_lookup.csv',na.strings=c("","NA"))
+store <- read.csv('dh_store_lookup.csv',na.strings=c("","NA"))
+transactions <- read.csv('dh_transactions.csv',na.strings=c("","NA"))
+data(zipcode)
+zipcode$zip <- as.integer(zipcode$zip)
+```
+
+
+```{r transform data type, message=FALSE,warning=FALSE, include=FALSE}
+# data <- list(causal, product, store, transactions)
+# 
+# check_class <- lapply(data, function(x) lapply(x, class))
+
+dat <- left_join(transactions, product, by='upc')
+dat <- left_join(dat,store, by='store')
+dat <- left_join(dat,zipcode, by=c('store_zip_code'='zip'))
+dat$year <- ifelse(dat$week <= 52, 1, 2)
+dat$week_dup <- ifelse(dat$week <= 52, dat$week, dat$week - 52)
+
+
+# dat$household <- as.character(dat$household)
+```
+
+```{r missing value check,message=FALSE,warning=FALSE,include=FALSE}
+missing_value <- lapply(dat,function(x) map_dbl(x,~sum(is.na(.))))
+```
+
+
+## Overview of Transaction
+
+```{r unique value check,warning=FALSE, message=FALSE, echo=FALSE}
+unique_value_transactions = as.data.frame(purrr::map_dbl(transactions,~length(unique(.))))
+missing_value_transactions = as.data.frame(purrr::map_dbl(transactions,~sum(is.na(.)))) 
+
+                           
+colnames(unique_value_transactions) = 'number_of_unique_values'
+unique_value_transactions$number_of_missing_values = missing_value_transactions$`purrr::map_dbl(transactions, ~sum(is.na(.)))`
+```
+
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+unique_value_dat = as.data.frame(purrr::map_dbl(dat,~length(unique(.))))
+missing_value_dat = as.data.frame(purrr::map_dbl(dat,~sum(is.na(.)))) 
+
+                           
+colnames(unique_value_dat) = 'number_of_unique_values'
+unique_value_dat$number_of_missing_values = missing_value_dat$`purrr::map_dbl(dat, ~sum(is.na(.)))`
+```
+
+These transactions tracked purchases over a two year period in `r unique_value_dat['state','number_of_unique_values']` states and total over `r nrow(transactions)` specific product purchases were recorded. Total `r nrow(transactions)` specific items purchases were recorded across `r unique_value_transactions['store','number_of_unique_values']` unique stores. A total of `r unique_value_transactions['upc','number_of_unique_values']` different products within the four commodities were recorded during this time period. 
+
+```{r warning=FALSE, message=FALSE, echo=FALSE,results='asis'}
+knitr::kable(unique_value_transactions)   
+```
+
+### Transactions over Time
+The following graph suggests that the quantity of items purchase is comparably consistent in two-year.The purchases reach a spike in week 27. Some obvious changes could be observed between week 32 and week 44.
+```{r message=FALSE, warning=FALSE,echo=FALSE}
+week_items_plot <- dat %>% 
+  mutate(year = as.character(year)) %>% 
+  group_by(year,week_dup) %>% 
+  dplyr::summarise(total_purchases = n()) %>% 
+  ggplot(aes(x = reorder(week_dup,week_dup),y = total_purchases,group = year, color = year))+
+  geom_line()+
+  geom_point()+
+  theme(axis.text.x=element_text(angle=0, hjust=1))+
+  ggtitle('Total Purchases Comparision (by Week)')+
+  theme(plot.title = element_text(hjust = 0.5),
+        panel.border = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.grid.major = element_blank(),
+        axis.line = element_line(colour = "black"),
+        axis.line.x = element_line(color="black"),
+        axis.text.x=element_text(angle=40, hjust=1))+
+  scale_x_discrete(name="Week") +
+  scale_y_continuous(name="Total Purchases")
+week_items_plot
+```
+
+```{r message=FALSE, warning=FALSE,echo=FALSE}
+week_sales_plot <- dat %>% 
+  mutate(year = as.character(year)) %>% 
+  group_by(year,week_dup) %>% 
+  dplyr::summarise(total_sales = sum(dollar_sales)) %>% 
+  ggplot(aes(x = reorder(week_dup,week_dup),y = total_sales,group = year, color = year))+
+  geom_line()+
+  geom_point()+
+  theme(axis.text.x=element_text(angle=0, hjust=1))+
+  ggtitle('Total Sales Comparision (by Week)')+
+  theme(plot.title = element_text(hjust = 0.5),
+        panel.border = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.grid.major = element_blank(),
+        axis.line = element_line(colour = "black"),
+        axis.line.x = element_line(color="black"),
+        axis.text.x=element_text(angle=40, hjust=1))+
+  scale_x_discrete(name="Week") +
+  scale_y_continuous(name="Total Sales")
+week_sales_plot
+```
+
+### Transactions across States
+The following table show the number of household in each state:
+```{r  message=FALSE, warning=FALSE,echo=FALSE, results='asis'}
+state_household <- dat %>% 
+  group_by(state) %>% 
+  dplyr::summarise(total_household = n_distinct(household)) %>% 
+  arrange(desc(total_household))
+knitr::kable(state_household)   
+```
+
+
+Each state shows consistency in items purchases in this two-year. The items purchase in GA, KY and TN are much higher than remaining states, which is also consistent with the number of household. 
+```{r message=FALSE, warning=FALSE,echo=FALSE}
+state_items_plot <- dat %>% 
+  mutate(year = as.character(year)) %>% 
+  group_by(year,state) %>% 
+  dplyr::summarise(total_purchases = n()) %>% 
+  ggplot(aes(x = state,y = total_purchases,group = year, color = year))+
+  geom_line()+
+  geom_point()+
+  theme(axis.text.x=element_text(angle=0, hjust=1))+
+  ggtitle('Total Purchases Comparision (by State)')+
+  theme(plot.title = element_text(hjust = 0.5),
+        panel.border = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.grid.major = element_blank(),
+        axis.line = element_line(colour = "black"),
+        axis.line.x = element_line(color="black"),
+        axis.text.x=element_text(angle=0, hjust=1))+
+  scale_x_discrete(name="State") +
+  scale_y_continuous(name="Total Purchases")
+state_items_plot
+```
+
+Through the deeper observations, we could find that in week 12, purchases in GA dropped greatly in second year. In week 27, purchases in KY and TN increased greatly. Further investigation is required to adjust strategy accordingly.
+
+```{r message=FALSE, warning=FALSE,echo=FALSE}
+week_state_items_plot <- dat %>% 
+  filter(state %in% c('GA','KY','TN')) %>% 
+  mutate(year = as.character(year)) %>% 
+  group_by(year,state,week_dup) %>% 
+  dplyr::summarise(total_purchases = n()) %>% 
+  ggplot(aes(x = reorder(week_dup,week_dup),y = total_purchases,group = year, color = year))+
+  geom_line()+
+  geom_point()+
+  theme(axis.text.x=element_text(angle=0, hjust=1))+
+  ggtitle('Total Purchases Comparision (by Week and State)')+
+  theme(plot.title = element_text(hjust = 0.5),
+        panel.border = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.grid.major = element_blank(),
+        axis.line = element_line(colour = "black"),
+        axis.line.x = element_line(color="black"),
+        axis.text.x=element_text(angle=40, hjust=1))+
+  scale_x_discrete(name="Week") +
+  scale_y_continuous(name="Total Purchases") +
+  facet_wrap(~state,ncol=1,scales = "free")
+
+
+week_state_items_plot
+```
+
+### Transactions for Each Commodity
+Each commodity shows consistency in items purchases in this two-year. The items purchase in pasta and pasta sauce are much higher than pancake mix and syrups. 
+
+```{r  message=FALSE, warning=FALSE,echo=FALSE}
+commodity_items_plot <- dat %>% 
+  mutate(year = as.character(year)) %>% 
+  group_by(year,commodity) %>% 
+  dplyr::summarise(total_purchases = n()) %>% 
+  ggplot(aes(x = commodity,y = total_purchases,fill = year))+
+  geom_bar(stat="identity",position = 'dodge')+
+  theme_bw()+
+  theme(axis.text.x=element_text(angle=0, hjust=1))+
+  ggtitle('Total Purchases Comparision (by Commodity)')+
+  theme(plot.title = element_text(hjust = 0.5),
+        panel.border = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.grid.major = element_blank(),
+        axis.line = element_line(colour = "black"),
+        axis.line.x = element_line(color="black"),
+        axis.text.x=element_text(angle=0, hjust=1))+
+  scale_x_discrete(name="Commodity") +
+  scale_y_continuous(name="Total Purchases")
+
+commodity_items_plot
+```
+
+
+Shoppers purchased pasta and pasta sauce in preference to panckae and syrup arcoss states.
+```{r  message=FALSE, warning=FALSE,echo=FALSE}
+commodity_state_items_plot <- dat %>% 
+  filter(state %in% c('GA','KY','TN')) %>% 
+  mutate(year = as.character(year)) %>% 
+  group_by(year,state,commodity) %>% 
+  dplyr::summarise(total_purchases = n()) %>% 
+  ggplot(aes(x = commodity,y = total_purchases,fill = year))+
+  geom_bar(stat="identity",position = 'dodge')+
+  theme_bw()+
+  theme(axis.text.x=element_text(angle=0, hjust=1))+
+  ggtitle('Total Purchases Comparision (by Commodity and Big State)')+
+  theme(plot.title = element_text(hjust = 0.5),
+        panel.border = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.grid.major = element_blank(),
+        axis.line = element_line(colour = "black"),
+        axis.line.x = element_line(color="black"),
+        axis.text.x=element_text(angle=30, hjust=1))+
+  scale_x_discrete(name="Commodity") +
+  scale_y_continuous(name="Total Purchases") +
+  facet_wrap(~state,ncol=1,scales = "free")
+
+commodity_state_items_plot
+```
+
+```{r  message=FALSE, warning=FALSE,echo=FALSE}
+commodity_state_items_plot <- dat %>% 
+  filter(!(state %in% c('GA','KY','TN'))) %>% 
+  mutate(year = as.character(year)) %>% 
+  group_by(year,state,commodity) %>% 
+  dplyr::summarise(total_purchases = n()) %>% 
+  ggplot(aes(x = commodity,y = total_purchases,fill = year))+
+  geom_bar(stat="identity",position = 'dodge')+
+  theme_bw()+
+  theme(axis.text.x=element_text(angle=0, hjust=1))+
+  ggtitle('Total Purchases Comparision (by Commodity and Small State)')+
+  theme(plot.title = element_text(hjust = 0.5),
+        panel.border = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.grid.major = element_blank(),
+        axis.line = element_line(colour = "black"),
+        axis.line.x = element_line(color="black"),
+        axis.text.x=element_text(angle=30, hjust=1))+
+  scale_x_discrete(name="Commodity") +
+  scale_y_continuous(name="Total Purchases") +
+  facet_wrap(~state,ncol=2,scales = "free")
+
+commodity_state_items_plot
+```
+
+The purchase of pancake mixes and syrups are very stable across a year. The purchase of pasta is comparably stable. However, the purchase of pasta sauce reach two spikes in a year, causing the spikes for total purchase. Since purchase of pasta and pasta sauce do come in hand by hand, it is surprising that the purchase of pasta do not increase greatly during that period. Further research is required for better management. 
+```{r message=FALSE, warning=FALSE,echo=FALSE}
+week_commodity_items_plot <- dat %>% 
+  mutate(year = as.character(year)) %>% 
+  group_by(year,commodity,week_dup) %>% 
+  dplyr::summarise(total_purchases = n()) %>% 
+  ggplot(aes(x = reorder(week_dup,week_dup),y = total_purchases,group = year, color = year))+
+  geom_line()+
+  geom_point()+
+  theme(axis.text.x=element_text(angle=0, hjust=1))+
+  ggtitle('Total Purchases Comparision (by Week and Commodity)')+
+  theme(plot.title = element_text(hjust = 0.5),
+        panel.border = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.grid.major = element_blank(),
+        axis.line = element_line(colour = "black"),
+        axis.line.x = element_line(color="black"),
+        axis.text.x=element_text(angle=40, hjust=1))+
+  scale_x_discrete(name="Week") +
+  scale_y_continuous(name="Total Purchases") +
+  facet_wrap(~commodity,ncol=1,scales = "free")
+
+
+week_commodity_items_plot
+```
+
+The above observation is found across states.
+```{r message=FALSE, warning=FALSE,echo=FALSE}
+
+week_commodity_state_items_plot <- dat %>% 
+    filter(commodity %in% c('pasta','pasta sauce')) %>% 
+  mutate(year = as.character(year)) %>% 
+  group_by(year,state,commodity,week_dup) %>% 
+  dplyr::summarise(total_purchases = n()) %>% 
+  ggplot(aes(x = reorder(week_dup,week_dup),y = total_purchases,group = year, color = year))+
+  geom_line()+
+  geom_point()+
+  theme(axis.text.x=element_text(angle=0, hjust=1))+
+  ggtitle('Total Purchases Comparision (by Week,State,and Commodity)')+
+  theme(plot.title = element_text(hjust = 0.5),
+        panel.border = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.grid.major = element_blank(),
+        axis.line = element_line(colour = "black"),
+        axis.line.x = element_line(color="black"),
+        axis.text.x=element_text(angle=60, hjust=1))+
+  scale_x_discrete(name="Week") +
+  scale_y_continuous(name="Total Purchases") +
+  facet_grid(state~commodity,scale = "free_y")
+
+week_commodity_state_items_plot
+# grid.arrange(week_commodity_state_items_plot,nrow=1)
+```
+
+```{r message=FALSE, warning=FALSE,echo=FALSE}
+
+week_commodity_state_items_plot <- dat %>% 
+    filter(!(commodity %in% c('pasta','pasta sauce'))) %>% 
+  mutate(year = as.character(year)) %>% 
+  group_by(year,state,commodity,week_dup) %>% 
+  dplyr::summarise(total_purchases = n()) %>% 
+  ggplot(aes(x = reorder(week_dup,week_dup),y = total_purchases,group = year, color = year))+
+  geom_line()+
+  geom_point()+
+  theme(axis.text.x=element_text(angle=0, hjust=1))+
+  ggtitle('Total Purchases Comparision (by Week,State,and Commodity)')+
+  theme(plot.title = element_text(hjust = 0.5),
+        panel.border = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.grid.major = element_blank(),
+        axis.line = element_line(colour = "black"),
+        axis.line.x = element_line(color="black"),
+        axis.text.x=element_text(angle=60, hjust=1))+
+  scale_x_discrete(name="Week") +
+  scale_y_continuous(name="Total Purchases") +
+  facet_grid(state~commodity,scale = "free_y")
+
+week_commodity_state_items_plot
+# grid.arrange(week_commodity_state_items_plot,nrow=1)
+```
+
+
+## Penetration
+### Household Product Penetration 
+The household penetration of each product within each commodity shows us a simple view of preferences within our grocery shopper population. There are a total `r unique_value_transactions['household','number_of_unique_values']` distinct households within this data set, and the following table shows how many distinct households within this total
+actually shopped in each of our four commodities. 
+
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+dat_commodity_household <- dat %>% 
+    group_by(commodity) %>% 
+    dplyr::summarise(unique_household_count = n_distinct(household),
+           percentage_household = round(unique_household_count/unique_value_transactions['household','number_of_unique_values'],2)) %>% 
+    arrange(desc(percentage_household))
+
+
+knitr::kable(dat_commodity_household)   
+```
+
+
+### Pasta
+The following table shows the product/brand penetration of the Pasta commodity group.
+It looks like our grocery shoppers are more price conscious within this area and that the Private Label manufacturers have a solid market share of the sales. 
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+dat_pasta_household <- dat %>% 
+  filter(commodity == 'pasta') %>% 
+  group_by(brand) %>% 
+  dplyr::summarise(unique_household_count = n_distinct(household),
+           percentage_household = round(unique_household_count/unique_value_transactions['household','number_of_unique_values'],2)) %>% 
+    arrange(desc(percentage_household))
+
+knitr::kable(head(dat_pasta_household,n=5))   
+```
+
+
+
+### Pasta Sauce
+Contrary to the Pasta commodity finding, the Private Label brand does not have control of the market share within this group; it holds the third spot in which only about 25% of the shoppers that do buy pasta sauce tend to buy the Private Label brand. Since Pasta and Pasta Sauce do go hand in hand, the Private Label brand managers may have an opportunity within this area to do cross-commodity marketing.
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+dat_pasta_household <- dat %>% 
+  filter(commodity == 'pasta sauce') %>% 
+  group_by(brand) %>% 
+  dplyr::summarise(unique_household_count = n_distinct(household),
+           percentage_household = round(unique_household_count/unique_value_transactions['household','number_of_unique_values'],2)) %>% 
+    arrange(desc(percentage_household))
+
+knitr::kable(head(dat_pasta_household,n=5))   
+```
+
+
+
+### Pancake Mixes
+Similar with Pasta Sauce commodity finding, the Private Label brand does not have control of the market share within this group; it is the third place in which only about 25% of the shoppers that do buy pancake mixes do buy the Private Label brand. Some opportunites within this commodity could be grabbed.
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+dat_pasta_household <- dat %>% 
+  filter(commodity == 'pancake mixes') %>% 
+  group_by(brand) %>% 
+  dplyr::summarise(unique_household_count = n_distinct(household),
+           percentage_household = round(unique_household_count/unique_value_transactions['household','number_of_unique_values'],2)) %>% 
+    arrange(desc(percentage_household)) 
+
+knitr::kable(head(dat_pasta_household,n=5))   
+```
+
+
+### Syrups
+The Private Label dominates this commodity. Thus, Private Label brand managers may consider there are cross-commodity marketing opportunities within this area as well as within the Pasta and Pasta Sauce groups.
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+dat_pasta_household <- dat %>% 
+  filter(commodity == 'syrups') %>% 
+  group_by(brand) %>% 
+  dplyr::summarise(unique_household_count = n_distinct(household),
+           percentage_household = round(unique_household_count/unique_value_transactions['household','number_of_unique_values'],2)) %>% 
+    arrange(desc(percentage_household)) 
+
+knitr::kable(head(dat_pasta_household,n=5))   
+```
+
+
+## Dollar Sales and Number of Purchases
+### Commodity
+Even though shoppers purchase pasta more than pasta sauce, the dollar sales of pasta sauce are much higher than pasta, given the unit price. Store managers may think about increasing shoppers chocies about pasata sauce. It is also the same case with syrups. 
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+
+sales_commodity <- dat %>% 
+  group_by(commodity) %>% 
+  dplyr::summarize(total_purchases = n(),
+                   total_units = sum(units),total_sales = sum(dollar_sales),
+                   avg_pay = total_sales/total_purchases, 
+                   avg_unit_price = total_sales/total_units) %>% 
+  arrange(desc(total_sales)) %>% 
+  slice(1:5)
+
+knitr::kable(sales_commodity) 
+```
+
+### Pasta
+The following table shows top 5 pasta products (based on total sales). Products of Private label dominates this commodity. Shoppers do not favor the cheapest one. Pasta managers may pay more attentions on shoppers peference in pasta type rather than price.
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+
+sales_pasta_product <- dat %>% 
+  filter(commodity == 'pasta') %>% 
+  group_by(product_description) %>% 
+  dplyr::summarize(total_purchases = n(),total_units = sum(units),total_sales = sum(dollar_sales),
+                   avg_pay = total_sales/total_purchases,avg_unit_price = total_sales/total_units) %>% 
+  arrange(desc(total_sales)) %>% 
+  slice(1:5)
+
+knitr::kable(sales_pasta_product) 
+```
+
+The following table show top 5 pasta brands (based on total sales), which is slight different from observations of penetration. Ronzoni is not in top 5 in penetration but has better dollar sales. Ronzoni managers should think about acquring more shoppers to increase penetration.
+Besides, almost half of purchases are generated by Private Label, which is greatly unbalanced.
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+pasta_purchase <- nrow(dat[dat$commodity == 'pasta',])
+
+sales_pasta_brand <- dat %>% 
+  filter(commodity == 'pasta') %>% 
+  group_by(brand) %>% 
+  dplyr::summarize(total_purchases = n(),
+                   purchase_percentage = round(total_purchases/pasta_purchase,digits=2),
+                   total_units = sum(units),total_sales = sum(dollar_sales),
+                   avg_pay = total_sales/total_purchases,avg_unit_price = total_sales/total_units) %>% 
+  arrange(desc(total_sales)) %>% 
+  slice(1:5)
+
+knitr::kable(sales_pasta_brand) 
+```
+
+The following table show top 3 pasta brands (based on total sales) across states. Private Label is a dominator. Barilla and Creamette also have great performance in most states. Mangers of them may think about expansion strategy in other states. 
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+sales_pasta_state <- dat %>% 
+  filter(commodity == 'pasta') %>% 
+  group_by(state,brand) %>% 
+  dplyr::summarize(total_purchases = n(),total_units = sum(units),total_sales = sum(dollar_sales),
+                   avg_pay = total_sales/total_purchases,avg_unit_price = total_sales/total_units) %>% 
+  arrange(desc(total_sales)) %>% 
+  slice(1:3)
+
+knitr::kable(sales_pasta_state) 
+```
+
+The following geo-graph shows more details about pasta sales in different stores (based on zipcode):
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+pasta.info <- dat %>%
+  filter(commodity == 'pasta') %>% 
+  group_by(store_zip_code) %>%
+  dplyr::summarise(lat=as.numeric(latitude[1]),
+            long=as.numeric(longitude[1]),
+            tot_sales = sum(dollar_sales),
+            n.trans=n(),intro=paste0(store[1],'<br/>',
+                                   'Number of transactions: ',n.trans, '<br/>', 'Total Sales: ', tot_sales))
+                           
+factpal <- colorFactor(palette = 'Dark2', domain = pasta.info$tot_sales)
+leaflet(pasta.info) %>%                              
+  addTiles(urlTemplate = 'http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png') %>%
+  addCircles(lng = ~long, lat = ~lat,radius = ~sqrt(n.trans)*20,weight=8,popup = ~intro,color=~factpal(tot_sales))
+```
+
+
+
+### Pasta Sauce
+The following table show top 5 pasta sauce products (based on total sales). 
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+
+sales_pasta_sauce_product <- dat %>% 
+  filter(commodity == 'pasta sauce') %>% 
+  group_by(product_description) %>% 
+  dplyr::summarize(total_purchases = n(),total_units = sum(units),total_sales = sum(dollar_sales),
+                   avg_pay = total_sales/total_purchases,avg_unit_price = total_sales/total_units) %>% 
+  arrange(desc(total_sales)) %>% 
+  slice(1:5)
+
+knitr::kable(sales_pasta_sauce_product) 
+```
+
+The following table show top 5 pasta sauce brands (based on total sales).Private Label is the fourth place. The Private Label brand managers may have an opportunity within this area to do cross-commodity marketing. Besides, Bertolli managers may consider acquring more new shoppers to increase penetration.
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+pasta_sauce_purchase = nrow(dat[dat$commodity == 'pasta sauce',])
+
+sales_pasta_sauce_brand <- dat %>% 
+  filter(commodity == 'pasta sauce') %>% 
+  group_by(brand) %>% 
+  dplyr::summarize(total_purchases = n(),
+                   purchase_percentage = round(total_purchases/pasta_sauce_purchase,digits=2),
+                   total_units = sum(units),total_sales = sum(dollar_sales),
+                   avg_pay = total_sales/total_purchases,avg_unit_price = total_sales/total_units) %>% 
+  arrange(desc(total_sales)) %>% 
+  slice(1:5)
+
+knitr::kable(sales_pasta_sauce_brand) 
+```
+
+The following table show top 3 pasta sauce brands (based on total sales) across states. The Private Label brand managers should pay attentions to GA,KY,and TN market, where have amount of pasta shoppers, but shoppers there do not favor Private Label pasta sauce. 
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+sales_pasta_sauce_state <- dat %>% 
+  filter(commodity == 'pasta sauce') %>% 
+  group_by(state,brand) %>% 
+  dplyr::summarize(total_purchases = n(),total_units = sum(units),total_sales = sum(dollar_sales),
+                   avg_pay = total_sales/total_purchases,avg_unit_price = total_sales/total_units) %>% 
+  arrange(desc(total_sales)) %>% 
+  slice(1:3)
+
+knitr::kable(sales_pasta_sauce_state) 
+```
+
+The following geo-graph shows more details about pasta sauce sales in different stores (based on zipcode):
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+pasta_sauce.info <- dat %>%
+  filter(commodity == 'pasta sauce') %>% 
+  group_by(store_zip_code) %>%
+  dplyr::summarise(lat=as.numeric(latitude[1]),
+            long=as.numeric(longitude[1]),
+            tot_sales = sum(dollar_sales),
+            n.trans=n(),intro=paste0(store[1],'<br/>',
+                                   'Number of transactions: ',n.trans, '<br/>', 'Total Sales: ', tot_sales))
+                           
+factpal <- colorFactor(palette = 'Dark2', domain = pasta_sauce.info$tot_sales)
+leaflet(pasta_sauce.info) %>%                              
+  addTiles(urlTemplate = 'http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png') %>%
+  addCircles(lng = ~long, lat = ~lat,radius = ~sqrt(n.trans)*20,weight=8,popup = ~intro,color=~factpal(tot_sales))
+```
+
+
+### Pancake Mixes
+The following table show top 5 pancake mix products (based on total sales).
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+
+sales_pancake_mix_product <- dat %>% 
+  filter(commodity == 'pancake mixes') %>% 
+  group_by(product_description) %>% 
+  dplyr::summarize(total_purchases = n(),total_units = sum(units),total_sales = sum(dollar_sales),
+                   avg_pay = total_sales/total_purchases,avg_unit_price = total_sales/total_units) %>% 
+  arrange(desc(total_sales)) %>% 
+  slice(1:5)
+
+knitr::kable(sales_pancake_mix_product) 
+```
+
+The following table show top 5 pancake mix brands (based on total sales). Aunt Jemima is a solid dominator in this area. Private Label managers may think about differentiation strategy to earn the market share.
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+pancake_mix_purchase <- nrow(dat[dat$commodity == 'pancake mixes',])
+  
+sales_pancake_mix_brand <- dat %>% 
+  filter(commodity == 'pancake mixes') %>% 
+  group_by(brand) %>% 
+  dplyr::summarize(total_purchases = n(),
+                   purchase_percentage = round(total_purchases/pancake_mix_purchase,digits=2),
+                   total_units = sum(units),total_sales = sum(dollar_sales),
+                   avg_pay = total_sales/total_purchases,avg_unit_price = total_sales/total_units) %>% 
+  arrange(desc(total_sales)) %>% 
+  slice(1:5)
+
+knitr::kable(sales_pancake_mix_brand) 
+```
+
+The following table show top 3 pancake mix brands (based on total sales) across states. The ranking is surprisingly consistent across states. Other brands face great challenges in this commodity. Thus other brands managers may think about starting the challenge in one or two states instead of competing in every states.
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+sales_pancake_mix_state <- dat %>% 
+  filter(commodity == 'pancake mixes') %>% 
+  group_by(state,brand) %>% 
+  dplyr::summarize(total_purchases = n(),total_units = sum(units),total_sales = sum(dollar_sales),
+                   avg_pay = total_sales/total_purchases,avg_unit_price = total_sales/total_units) %>% 
+  arrange(desc(total_sales)) %>% 
+  slice(1:3)
+
+knitr::kable(sales_pancake_mix_state) 
+```
+
+The following geo-graph shows more details about pancake mix sales in different stores (based on zipcode):
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+pancake_mix.info <- dat %>%
+  filter(commodity == 'pancake mixes') %>% 
+  group_by(store_zip_code) %>%
+  dplyr::summarise(lat=as.numeric(latitude[1]),
+            long=as.numeric(longitude[1]),
+            tot_sales = sum(dollar_sales),
+            n.trans=n(),intro=paste0(store[1],'<br/>',
+                                   'Number of transactions: ',n.trans, '<br/>', 'Total Sales: ', tot_sales))
+                           
+factpal <- colorFactor(palette = 'Dark2', domain = pancake_mix.info$tot_sales)
+leaflet(pancake_mix.info) %>%                              
+  addTiles(urlTemplate = 'http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png') %>%
+  addCircles(lng = ~long, lat = ~lat,radius = ~sqrt(n.trans)*20,weight=8,popup = ~intro,color=~factpal(tot_sales))
+```
+
+
+
+
+### Syrups
+The following table show top 5 syrups products (based on total sales).
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+
+sales_syrups_product <- dat %>% 
+  filter(commodity == 'syrups') %>% 
+  group_by(product_description) %>% 
+  dplyr::summarize(total_purchases = n(),total_units = sum(units),total_sales = sum(dollar_sales),
+                   avg_pay = total_sales/total_purchases,avg_unit_price = total_sales/total_units) %>% 
+  arrange(desc(total_sales)) %>% 
+  slice(1:5)
+
+knitr::kable(sales_syrups_product) 
+```
+
+The following table show top 5 syrups brands (based on total sales). Private Label is neck to neck with Aunt Jemima. Aunt Jemima managers should consider increasing penetration to boost the total purchases. The same advise for Log Cabin, since their penetration has potential to be increased. 
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+syrups_purchase <- nrow(dat[dat$commodity == 'syrups',])
+
+sales_syrups_brand <- dat %>% 
+  filter(commodity == 'syrups') %>% 
+  group_by(brand) %>% 
+  dplyr::summarize(total_purchases = n(),
+                   purchase_percentage = round(total_purchases/syrups_purchase,digits=2),
+                   total_units = sum(units),total_sales = sum(dollar_sales),
+                   avg_pay = total_sales/total_purchases,avg_unit_price = total_sales/total_units) %>% 
+  arrange(desc(total_sales)) %>% 
+  slice(1:5)
+
+knitr::kable(sales_syrups_brand) 
+```
+
+The following table show top 3 syrups brands (based on total sales) across states.Aunt Jemima should pay more attentions to IL market, since it is neck to neck with Mrs Butterworth. 
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+sales_syrups_state <- dat %>% 
+  filter(commodity == 'syrups') %>% 
+  group_by(state,brand) %>% 
+  dplyr::summarize(total_purchases = n(),total_units = sum(units),total_sales = sum(dollar_sales),
+                   avg_pay = total_sales/total_purchases,avg_unit_price = total_sales/total_units) %>% 
+  arrange(desc(total_sales)) %>% 
+  slice(1:3)
+
+knitr::kable(sales_syrups_state) 
+```
+
+The following geo-graph shows more details about syrups sales in different stores (based on zipcode):
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+syrups.info <- dat %>%
+  filter(commodity == 'syrups') %>% 
+  group_by(store_zip_code) %>%
+  dplyr::summarise(lat=as.numeric(latitude[1]),
+            long=as.numeric(longitude[1]),
+            tot_sales = sum(dollar_sales),
+            n.trans=n(),intro=paste0(store[1],'<br/>',
+                                   'Number of transactions: ',n.trans, '<br/>', 'Total Sales: ', tot_sales))
+                           
+factpal <- colorFactor(palette = 'Dark2', domain = syrups.info$tot_sales)
+leaflet(syrups.info) %>%                              
+  addTiles(urlTemplate = 'http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png') %>%
+  addCircles(lng = ~long, lat = ~lat,radius = ~sqrt(n.trans)*20,weight=8,popup = ~intro,color=~factpal(tot_sales))
+```
+
+## Repeat Purchase Rate
+The formula for repeat purchase rate is:
+$$ Repeat Purchase Rate = Number of Repeat Shoppers/ Number of Total Shoppers $$
+
+### Pasta
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+total_household_pasta <- length(unique(dat[dat$commodity == 'pasta',]$household))
+
+repeat_household_pasta <- dat %>% 
+  filter(commodity == 'pasta') %>% 
+  group_by(household) %>% 
+  dplyr::summarize(total_purchase = n_distinct(basket)) %>% 
+  filter(total_purchase != 1)
+
+repeat_pasta = round(nrow(repeat_household_pasta)/total_household_pasta,digits=2)
+```
+
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+repeat_household_pasta <- dat %>% 
+  filter(commodity == 'pasta') %>% 
+  group_by(household) %>% 
+  dplyr::summarize(total_purchase = n_distinct(basket)) %>% 
+  arrange(desc(total_purchase))
+avg_household_pasta <- ceiling(mean(repeat_household_pasta$total_purchase))
+```
+
+Repeat purchase rate for pasta is `r repeat_pasta`. Each shopper purchase pasta averagely `r avg_household_pasta`.
+
+We consider shoppers who purchase more than the `r avg_household_pasta` are frequent shoppers.
+Following table shows top 5 brands with most percentage of frequent shoppers. Dollar sales of Mlinotst and Private Label heavily rely on frequent shoppers.
+
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+repeat_household_pasta <- dat %>% 
+  filter(commodity == 'pasta') %>% 
+  group_by(brand,household) %>% 
+  dplyr::summarize(total_purchase = n_distinct(basket),total_sales = sum(dollar_sales)) %>% 
+  mutate(frequent = ifelse(total_purchase >= avg_household_pasta, 1,0)) %>% 
+  group_by(brand, frequent) %>% 
+  dplyr::summarise(frequent_count = n(),sales = sum(total_sales)) %>% 
+  group_by(brand) %>% 
+  transmute(frequent,frequent_percentage = round(frequent_count/sum(frequent_count),digits=2),
+            sales_percentage = round(sales/sum(sales),digits=2)) %>% 
+  filter(frequent==1) %>% 
+  dplyr::select(brand,frequent_percentage,sales_percentage) %>% 
+  arrange(desc(frequent_percentage))
+
+knitr::kable(head(repeat_household_pasta,n=5))
+```
+
+
+### Pasta Sauce
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+total_household_pasta_sauce <- length(unique(dat[dat$commodity == 'pasta sauce',]$household))
+
+repeat_household_pasta_sauce <- dat %>% 
+  filter(commodity == 'pasta sauce') %>% 
+  group_by(household) %>% 
+  dplyr::summarize(total_purchase = n_distinct(basket)) %>% 
+  filter(total_purchase != 1)
+
+repeat_pasta_sauce = round(nrow(repeat_household_pasta_sauce)/total_household_pasta_sauce,digits=2)
+```
+
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+repeat_household_pasta_sauce <- dat %>% 
+  filter(commodity == 'pasta sauce') %>% 
+  group_by(household) %>% 
+  dplyr::summarize(total_purchase = n_distinct(basket)) %>% 
+  arrange(desc(total_purchase))
+avg_household_pasta_sauce <- ceiling(mean(repeat_household_pasta_sauce$total_purchase))
+```
+Repeat purchase rate for pasta_sauce is `r repeat_pasta_sauce`.Each shopper purchase pasta averagely `r avg_household_pasta_sauce`. 
+
+We consider shoppers who purchase more than the `r avg_household_pasta_sauce` are frequent shoppers.
+Following table shows top 5 brands with most percentage of frequent shoppers.Even though the percentage of frequent shoppers is not higt, the sales are still heavily rely on them.
+
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+repeat_household_pasta_sauce <- dat %>% 
+  filter(commodity == 'pasta sauce') %>% 
+  group_by(brand,household) %>% 
+  dplyr::summarize(total_purchase = n_distinct(basket),total_sales = sum(dollar_sales)) %>% 
+  mutate(frequent = ifelse(total_purchase >= avg_household_pasta_sauce, 1,0)) %>% 
+  group_by(brand, frequent) %>% 
+  dplyr::summarise(frequent_count = n(),sales = sum(total_sales)) %>% 
+  group_by(brand) %>% 
+  transmute(frequent,frequent_percentage = round(frequent_count/sum(frequent_count),digits=2),
+            sales_percentage = round(sales/sum(sales),digits=2)) %>% 
+  filter(frequent==1) %>% 
+  dplyr::select(brand,frequent_percentage,sales_percentage) %>% 
+  arrange(desc(frequent_percentage))
+
+knitr::kable(head(repeat_household_pasta_sauce,n=5))
+```
+
+### Pancake Mixes
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+total_household_pancake_mix <- length(unique(dat[dat$commodity == 'pancake mixes',]$household))
+
+repeat_household_pancake_mix <- dat %>% 
+  filter(commodity == 'pancake mixes') %>% 
+  group_by(household) %>% 
+  dplyr::summarize(total_purchase = n_distinct(basket)) %>% 
+  filter(total_purchase != 1)
+
+repeat_pancake_mix = round(nrow(repeat_household_pancake_mix)/total_household_pancake_mix,digits=2)
+```
+
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+repeat_household_pancake_mix <- dat %>% 
+  filter(commodity == 'pancake mixes') %>% 
+  group_by(household) %>% 
+  dplyr::summarize(total_purchase = n_distinct(basket)) %>% 
+  arrange(desc(total_purchase))
+avg_household_pancake_mix <- ceiling(mean(repeat_household_pancake_mix$total_purchase))
+```
+
+Repeat purchase rate for pancake_mix is `r repeat_pancake_mix`. Each shopper purchase pancake mixes averagely `r avg_household_pancake_mix`. 
+
+We consider shoppers who purchase more than the `r avg_household_pancake_mix` are frequent shoppers.
+Following table shows top 5 brands with most percentage of frequent shoppers. Even though the percentage of frequent shoppers is not higt, the sales are still heavily rely on them.
+
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+repeat_household_pancake_mix <- dat %>% 
+  filter(commodity == 'pancake mixes') %>% 
+  group_by(brand,household) %>% 
+  dplyr::summarize(total_purchase = n_distinct(basket),total_sales = sum(dollar_sales)) %>% 
+  mutate(frequent = ifelse(total_purchase >= avg_household_pancake_mix, 1,0)) %>% 
+  group_by(brand, frequent) %>% 
+  dplyr::summarise(frequent_count = n(),sales = sum(total_sales)) %>% 
+  group_by(brand) %>% 
+  transmute(frequent,frequent_percentage = round(frequent_count/sum(frequent_count),digits=2),
+            sales_percentage = round(sales/sum(sales),digits=2)) %>% 
+  filter(frequent==1) %>% 
+  dplyr::select(brand,frequent_percentage,sales_percentage) %>% 
+  arrange(desc(frequent_percentage))
+
+knitr::kable(head(repeat_household_pancake_mix,n=5))
+```
+
+
+
+
+### Syrups
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+total_household_syrups <- length(unique(dat[dat$commodity == 'syrups',]$household))
+
+repeat_household_syrups <- dat %>% 
+  filter(commodity == 'syrups') %>% 
+  group_by(household) %>% 
+  dplyr::summarize(total_purchase = n_distinct(basket)) %>% 
+  filter(total_purchase != 1)
+
+repeat_syrups = round(nrow(repeat_household_syrups)/total_household_syrups,digits=2)
+```
+
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+repeat_household_syrups <- dat %>% 
+  filter(commodity == 'syrups') %>% 
+  group_by(household) %>% 
+  dplyr::summarize(total_purchase = n_distinct(basket)) %>% 
+  arrange(desc(total_purchase))
+avg_household_syrups <- ceiling(mean(repeat_household_syrups$total_purchase))
+```
+
+Repeat purchase rate for syrups is `r repeat_syrups`.Each shopper purchase syrups averagely `r avg_household_syrups`. 
+
+We consider shoppers who purchase more than the `r avg_household_syrups` are frequent shoppers.
+Following table shows top 5 brands with most percentage frequent shoppers. Even though the percentage of frequent shoppers is not higt, the sales are still heavily rely on them.
+
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+repeat_household_syrups <- dat %>% 
+  filter(commodity == 'syrups') %>% 
+  group_by(brand,household) %>% 
+  dplyr::summarize(total_purchase = n_distinct(basket),total_sales = sum(dollar_sales)) %>% 
+  mutate(frequent = ifelse(total_purchase >= avg_household_syrups, 1,0)) %>% 
+  group_by(brand, frequent) %>% 
+  dplyr::summarise(frequent_count = n(),sales = sum(total_sales)) %>% 
+  group_by(brand) %>% 
+  transmute(frequent,frequent_percentage = round(frequent_count/sum(frequent_count),digits=2),
+            sales_percentage = round(sales/sum(sales),digits=2)) %>% 
+  filter(frequent==1) %>% 
+  dplyr::select(brand,frequent_percentage,sales_percentage) %>% 
+  arrange(desc(frequent_percentage))
+
+knitr::kable(head(repeat_household_syrups,n=5))
+```
+
+Generally, most shoppers repeatly purchase pasta and pasta sauce,and their repeat purchase rate is similar. But shoppers purchaes syrups more repeatly than panckae mixes. It suggests that shoppers consume syrups faster than pancake mixes, which provide a great opportunity for syrups brands.
+Through observations on frequent shoppers arcoss brands for each commodity, they make great contributions to sales.
+
+
+## Coupon
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+coupon <- dat %>% 
+  group_by(commodity,coupon) %>% 
+  dplyr::summarize(total_coupon_users = n_distinct(household)) %>%
+  group_by(commodity) %>% 
+  transmute(coupon, total_coupon_users = total_coupon_users,
+            user_percentage = round(total_coupon_users/sum(total_coupon_users),digits = 2)) %>% 
+    filter(coupon==1) %>% 
+  dplyr::select(commodity,total_coupon_users,user_percentage) 
+
+coupon_brand <- dat %>% 
+  group_by(commodity,brand,coupon) %>% 
+  dplyr::summarize(total_coupon_users = n_distinct(household)) %>%
+  group_by(commodity,brand) %>% 
+  transmute(coupon, total_coupon_users = total_coupon_users,
+            user_percentage = round(total_coupon_users/sum(total_coupon_users),digits = 2)) %>% 
+  filter(coupon==1) %>% 
+  arrange(commodity,desc(user_percentage)) %>% 
+  dplyr::select(commodity,brand,total_coupon_users,user_percentage) %>% 
+  group_by_(~ commodity) %>%
+  top_n(n = 5)
+
+brand_with_coupon <-  dat %>% 
+    filter(coupon==1) %>% 
+  group_by(commodity) %>% 
+  dplyr::summarise(have_coupon = n_distinct(brand)) %>% left_join(
+    dat %>% 
+  group_by(commodity) %>% 
+  dplyr::summarise(total_brand = n_distinct(brand)), by = 'commodity'
+  ) %>% 
+  mutate(coupon_percentage = round(have_coupon/total_brand,digits = 2))
+
+```
+
+
+### Brands with Coupons
+Here is the overview of coupon distributions for each commodity. 
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+knitr::kable(brand_with_coupon)
+```
+
+
+### Coupons over Time and States
+The pasta sauce coupon change over time is very consistent with previous purchases observation, and it is also stable in two-year period. But it is not the case for pasta, syrups, and pancake mixes. It seems that retailers or suppliers make different attempts about when to distribute coupons. Based on previous purchases observations, it seems that drop in coupons do not change purchase a lot. However, more research about threshold (minimum coupons) should be conducted.
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+coupon_week_plot <-  dat %>%
+  mutate(year = as.character(year)) %>% 
+  group_by(year,commodity,week_dup) %>% 
+  dplyr::summarise(total_coupons = sum(coupon)) %>% 
+  ggplot(aes(x = reorder(week_dup,week_dup),y = total_coupons,group = year, color = year))+
+  geom_line()+
+  geom_point()+
+  theme(axis.text.x=element_text(angle=0, hjust=1))+
+  ggtitle('Total Coupons Comparision (by Week)')+
+  theme(plot.title = element_text(hjust = 0.5),
+        panel.border = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.grid.major = element_blank(),
+        axis.line = element_line(colour = "black"),
+        axis.line.x = element_line(color="black"),
+        axis.text.x=element_text(angle=40, hjust=1))+
+  scale_x_discrete(name="Week") +
+  scale_y_continuous(name="Total Coupons") +
+  facet_wrap(~commodity,ncol=1,scales="free_y")
+
+coupon_week_plot
+```
+
+
+For pasta and pasta sauce, difference in coupons distribution is not great in each state. But it is not the same case for syrups and pancake mixes. For each state, they made diffferent efforts.
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+coupon_state_plot1 <-  dat %>%
+  filter(commodity %in% c('pasta','pasta sauce')) %>% 
+  mutate(year = as.character(year)) %>% 
+  group_by(year,commodity,state,week_dup) %>% 
+  dplyr::summarise(total_coupons = sum(coupon)) %>% 
+  ggplot(aes(x = reorder(week_dup,week_dup),y = total_coupons,group = year, color = year))+
+  geom_line()+
+  geom_point()+
+  theme(axis.text.x=element_text(angle=0, hjust=1))+
+  ggtitle('Total Coupons Comparision')+
+  theme(plot.title = element_text(hjust = 0.5),
+        panel.border = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.grid.major = element_blank(),
+        axis.line = element_line(colour = "black"),
+        axis.line.x = element_line(color="black"),
+        axis.text.x=element_text(angle=60, hjust=1))+
+  scale_x_discrete(name="Week") +
+  scale_y_continuous(name="Total Coupons") +
+  facet_grid(state~commodity,scales="free_y")
+
+coupon_state_plot2 <-  dat %>%
+  filter(!(commodity %in% c('pasta','pasta sauce'))) %>% 
+  mutate(year = as.character(year)) %>% 
+  group_by(year,commodity,state,week_dup) %>% 
+  dplyr::summarise(total_coupons = sum(coupon)) %>% 
+  ggplot(aes(x = reorder(week_dup,week_dup),y = total_coupons,group = year, color = year))+
+  geom_line()+
+  geom_point()+
+  theme(axis.text.x=element_text(angle=0, hjust=1))+
+  ggtitle('Total Coupons Comparision')+
+  theme(plot.title = element_text(hjust = 0.5),
+        panel.border = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.grid.major = element_blank(),
+        axis.line = element_line(colour = "black"),
+        axis.line.x = element_line(color="black"),
+        axis.text.x=element_text(angle=60, hjust=1))+
+  scale_x_discrete(name="Week") +
+  scale_y_continuous(name="Total Coupons") +
+  facet_grid(state~commodity,scales="free_y")
+
+coupon_state_plot1
+coupon_state_plot2
+```
+
+
+### Coupon Users
+`r  sum(coupon$total_coupon_users)` are actual coupon users; meaning, that they used a coupon at one time or another during any one of their shopping trips in this 2-year period. Only about `r round(sum(coupon$total_coupon_users)/sum(dat_commodity_household$unique_household_count),digits=2)` of our population uses coupons. The marketing brand managers are reaching a small pool of customers. 
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+knitr::kable(head(coupon))
+```
+
+
+The following table shows top 5 brands for each commodity (based on coupon user percentage).Popular brands, such as Private Label, do not have high coupon user percentage.
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+knitr::kable(coupon_brand)
+```
+
+
+### Coupons Users vs. Frequent Shoppers
+#### Pasta
+For pasta purchase, this suggests that coupon usage will lead to frequent purchase although further studies are required to confirm this. 
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+pasta_coupon_frequent <- dat %>% 
+  filter(commodity == 'pasta') %>% 
+  dplyr::select(brand,household,coupon) %>% 
+  left_join(
+    dat %>% 
+  filter(commodity == 'pasta') %>% 
+  group_by(brand,household) %>% 
+  dplyr::summarize(total_purchase = n_distinct(basket)) %>% 
+  mutate(frequent = ifelse(total_purchase >= avg_household_pasta, 1,0)),
+    by = c('brand','household')
+  ) 
+
+pasta_table = table(pasta_coupon_frequent$coupon, pasta_coupon_frequent$frequent) 
+
+chisq.test(pasta_table)
+```
+
+
+#### Pasta Sauce
+For pasta sauce purchase, this suggests that coupon usage will not lead to frequent purchase although further studies are required to confirm this. 
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+pasta_sauce_coupon_frequent <- dat %>% 
+  filter(commodity == 'pasta sauce') %>% 
+  dplyr::select(brand,household,coupon) %>% 
+  left_join(
+    dat %>% 
+  filter(commodity == 'pasta sauce') %>% 
+  group_by(brand,household) %>% 
+  dplyr::summarize(total_purchase = n_distinct(basket)) %>% 
+  mutate(frequent = ifelse(total_purchase >= avg_household_pasta_sauce, 1,0)),
+    by = c('brand','household')
+  ) 
+
+pasta_sauce_table = table(pasta_sauce_coupon_frequent$coupon, pasta_sauce_coupon_frequent$frequent) 
+
+chisq.test(pasta_sauce_table)
+```
+
+
+#### Pancake Mixes
+For pancake mixes purchase, this suggests that coupon usage will lead to frequent purchase although further studies are required to confirm this. 
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+pancake_mix_coupon_frequent <- dat %>% 
+  filter(commodity == 'pancake mixes') %>% 
+  dplyr::select(brand,household,coupon) %>% 
+  left_join(
+    dat %>% 
+  filter(commodity == 'pancake mixes') %>% 
+  group_by(brand,household) %>% 
+  dplyr::summarize(total_purchase = n_distinct(basket)) %>% 
+  mutate(frequent = ifelse(total_purchase >= avg_household_pancake_mix, 1,0)),
+    by = c('brand','household')
+  ) 
+
+pancake_mix_table = table(pancake_mix_coupon_frequent$coupon, pancake_mix_coupon_frequent$frequent) 
+
+chisq.test(pancake_mix_table)
+```
+
+
+#### Syrups
+For syrups purchase, this suggests that coupon usage will lead to frequent purchase although further studies are required to confirm this. 
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+syrups_coupon_frequent <- dat %>% 
+  filter(commodity == 'syrups') %>% 
+  dplyr::select(brand,household,coupon) %>% 
+  left_join(
+    dat %>% 
+  filter(commodity == 'syrups') %>% 
+  group_by(brand,household) %>% 
+  dplyr::summarize(total_purchase = n_distinct(basket)) %>% 
+  mutate(frequent = ifelse(total_purchase >= avg_household_syrups, 1,0)),
+    by = c('brand','household')
+  ) 
+
+syrups_table = table(syrups_coupon_frequent$coupon, syrups_coupon_frequent$frequent) 
+
+chisq.test(syrups_table)
+```
+
+In short, coupon usages do lead to frequent purchases for most commodities. 
+
+
+## Purchase Together 
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+# trans <- as(split(dat[,"brand"], data[,"basket"]), "dat")
+# inspect(trans)
+
+# data already prepared and stored, since it will take a while to run
+# dat_basket <- ddply(dat,"basket",
+#                        function(df1)paste(df1$brand,
+#                        collapse = ","))
+# colnames(dat_basket)[2] <- 'items'
+# itemList <- dat_basket
+# itemList$basket <- NULL
+# write.csv(itemList,'dat_basket.csv', quote = FALSE, row.names = FALSE, col.names=FALSE)
+
+# dat_basket <- read.csv('dat_basket.csv')
+
+tr <- read.transactions('dat_basket.csv', format = 'basket', sep=',')
+```
+ 
+The following graph is top 20 frequent purchase brands. 
+```{r top20, warning=FALSE, message=FALSE, echo=FALSE}
+itemFrequencyPlot(tr, topN=20, type='absolute')
+```
+
+```{r warning=FALSE, message=FALSE, echo=FALSE,results='hide'}
+association.rules <- apriori(tr, parameter = list(sup = 0.01, conf = 0.01,target="rules",minlen=2))
+association.rules <- sort(association.rules, by='confidence', decreasing = TRUE)
+inspect(association.rules[1:10])
+```
+
+Since most brands cover multiple commoditis, we picked two brands based on previous analysis to observe what other brands are frequently purchased with them together.
+
+### Private Label
+```{r warning=FALSE, message=FALSE, echo=FALSE,results='hide'}
+private_label.association.rules <- apriori(tr, parameter = list(sup = 0.01, conf = 0.01,target="rules",minlen=1),appearance = list(default="lhs",rhs="Private Label"))
+
+private_lable.association.rules <- sort(private_label.association.rules, by='confidence', decreasing = TRUE)
+private_label <- inspect(head(private_label.association.rules[1:3]))
+private_label$lhs <- as.character(private_label$lhs)
+```
+For Private Label, except for itself, associated brands are `r private_label[2,'lhs']` and `r private_label[3,'lhs']`.
+
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+knitr::kable(head(private_label,n=5))   
+```
+
+### Ragu
+```{r warning=FALSE, message=FALSE, echo=FALSE,results='hide'}
+ragu.association.rules <- apriori(tr, parameter = list(sup = 0.01, conf = 0.01,target="rules",minlen=1),appearance = list(default="lhs",rhs="Ragu"))
+ragu.association.rules <- sort(ragu.association.rules, by='confidence', decreasing = TRUE)
+ragu <- inspect(head(ragu.association.rules[1:3]))
+ragu$lhs <- as.character(ragu$lhs)
+```
+
+For Ragu, associated brands are `r ragu[1,'lhs']` and `r ragu[2,'lhs']`.
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+knitr::kable(head(ragu,n=5))   
+```
+
+  
